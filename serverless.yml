@@ -6,6 +6,24 @@ provider:
     runtime: nodejs20.x
     region: sa-east-1
     profile: personal
+    memorySize: 128
+    environment:
+        DYNAMO_LEADS_TABLE: !Ref LeadsTable
+        GENERATE_REPORT_QUEUE_URL: !Ref GenerateReportQueue
+    iam:
+        role:
+            statements:
+                # Dynamo DB
+                - Effect: Allow
+                  Resource: !GetAtt LeadsTable.Arn
+                  Action:
+                      - dynamodb:PutItem
+                      - dynamodb:Scan
+                # SQS
+                - Effect: Allow
+                  Resource: !GetAtt GenerateReportQueue.Arn
+                  Action:
+                      - sqs:SendMessage
 
 package:
     individually: true
@@ -19,15 +37,52 @@ build:
             - "@aws-sdk/*"
 
 functions:
-    hello:
-        handler: src/functions/hello.handler
+    populateDynamo:
+        handler: src/functions/http/populate-dynamo.handler
+        timeout: 25
         events:
             - httpApi:
-                  path: /
-                  method: GET
-    world:
-        handler: src/functions/world.handler
+                  path: /populate-dynamo
+                  method: POST
+    generateReport:
+        handler: src/functions/http/generate-report.handler
         events:
             - httpApi:
-                  path: /world
-                  method: GET
+                  path: /generate-report
+                  method: POST
+    processReport:
+        handler: src/functions/queues/process-report.handler
+        events:
+            - sqs:
+                  arn: !GetAtt GenerateReportQueue.Arn
+                  batchSize: 1
+
+resources:
+    Resources:
+        LeadsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: LeadsTable
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: id
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: id
+                      KeyType: HASH
+
+        GenerateReportQueue:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: GenerateReport
+                ReceiveMessageWaitTimeSeconds: 20
+                VisibilityTimeout: 180
+                RedrivePolicy:
+                    deadLetterTargetArn: !GetAtt GenerateReportDLQ.Arn
+                    maxReceiveCount: 2
+
+        GenerateReportDLQ:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: GenerateReportDLQ
+                MessageRetentionPeriod: 1209600 # 14 days
