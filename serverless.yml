@@ -1,6 +1,8 @@
 org: hobby31
 service: report-service
 
+useDotEnv: true
+
 provider:
     name: aws
     runtime: nodejs20.x
@@ -10,6 +12,8 @@ provider:
     environment:
         DYNAMO_LEADS_TABLE: !Ref LeadsTable
         GENERATE_REPORT_QUEUE_URL: !Ref GenerateReportQueue
+        REPORTS_BUCKET_NAME: !Ref ReportsBucket
+        RESEND_API_KEY: ${env:RESEND_API_KEY}
     iam:
         role:
             statements:
@@ -24,6 +28,13 @@ provider:
                   Resource: !GetAtt GenerateReportQueue.Arn
                   Action:
                       - sqs:SendMessage
+                # SE
+                - Effect: Allow
+                  Action:
+                      - s3:PutObject
+                      - s3:AbortMultipartUpload
+                      - s3:GetObject
+                  Resource: !Join ["/", [!GetAtt ReportsBucket.Arn, "*"]]
 
 package:
     individually: true
@@ -52,37 +63,13 @@ functions:
                   method: POST
     processReport:
         handler: src/functions/queues/process-report.handler
+        timeout: 180
         events:
             - sqs:
                   arn: !GetAtt GenerateReportQueue.Arn
                   batchSize: 1
 
 resources:
-    Resources:
-        LeadsTable:
-            Type: AWS::DynamoDB::Table
-            Properties:
-                TableName: LeadsTable
-                BillingMode: PAY_PER_REQUEST
-                AttributeDefinitions:
-                    - AttributeName: id
-                      AttributeType: S
-                KeySchema:
-                    - AttributeName: id
-                      KeyType: HASH
-
-        GenerateReportQueue:
-            Type: AWS::SQS::Queue
-            Properties:
-                QueueName: GenerateReport
-                ReceiveMessageWaitTimeSeconds: 20
-                VisibilityTimeout: 180
-                RedrivePolicy:
-                    deadLetterTargetArn: !GetAtt GenerateReportDLQ.Arn
-                    maxReceiveCount: 2
-
-        GenerateReportDLQ:
-            Type: AWS::SQS::Queue
-            Properties:
-                QueueName: GenerateReportDLQ
-                MessageRetentionPeriod: 1209600 # 14 days
+    - ${file(./resources/dynamodb/LeadsTable.yml)}
+    - ${file(./resources/sqs/GenerateReportQueue.yml)}
+    - ${file(./resources/s3/ReportsBucket.yml)}

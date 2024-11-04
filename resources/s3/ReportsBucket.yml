@@ -1,0 +1,15 @@
+Resources:
+    ReportsBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+            BucketName: reports-bucket-live039
+            LifecycleConfiguration:
+                Rules:
+                    - Id: auto-delete-after-one-day
+                      Status: Enabled
+                      ExpirationInDays: 1
+
+                    - Id: auto-delete-mpus-after-one-day
+                      Status: Enabled
+                      AbortIncompleteMultipartUpload:
+                          DaysAfterInitiation: 1
